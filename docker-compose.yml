@@ -1,0 +1,54 @@
+version: "3.9"
+services:
+  rabbitmq:
+    image: rabbitmq:3.9.28-management
+    container_name: 'rabbitmq'
+    environment:
+        - RABBITMQ_DEFAULT_USER=bee
+        - RABBITMQ_DEFAULT_PASS=beebee123
+        - RABBITMQ_MANAGEMENT_LOAD_DEFINITION="{""queues"":[{""name"":""jobs""}]}"
+    ports:
+        # AMQP protocol port
+        - '5672:5672'
+        # HTTP management UI
+        - '15672:15672'
+    networks:
+      - my_network
+
+  consumer:
+    image: consumer
+    container_name: 'consumer'
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command:
+      - /bin/wait-for-it.sh
+      - rabbitmq:5672
+      - --strict
+      - --timeout=60
+      - --
+      - python
+      - /app/consumer.py
+    ports:
+      - '5001:5001'
+    environment:
+      - AMQP_URL=amqp://bee:beebee123@rabbitmq:5672
+    depends_on:
+      - rabbitmq
+    networks:
+      - my_network
+    # create the queue before the consumer container starts
+    entrypoint:
+      - sh
+      - -c
+      - |
+        sleep 10 # wait for RabbitMQ to start up
+        python -c "import pika; \
+                   from os import environ; \
+                   parameters = pika.URLParameters(environ["AMQP_URL"]); \
+                   connection = pika.BlockingConnection(parameters); \
+                   channel = connection.channel(); \
+                   channel.queue_declare(queue='jobs', durable=True)"
+networks:
+  my_network:
+    driver: bridge
